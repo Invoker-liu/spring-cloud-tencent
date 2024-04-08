@@ -18,18 +18,23 @@
 
 package com.tencent.cloud.polaris.router.interceptor;
 
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
+import com.tencent.cloud.common.constant.RouterConstant;
 import com.tencent.cloud.polaris.router.PolarisRouterContext;
 import com.tencent.cloud.polaris.router.config.properties.PolarisRuleBasedRouterProperties;
 import com.tencent.cloud.polaris.router.spi.RouterRequestInterceptor;
+import com.tencent.polaris.api.pojo.RouteArgument;
 import com.tencent.polaris.plugins.router.rule.RuleBasedRouter;
 import com.tencent.polaris.router.api.rpc.ProcessRoutersRequest;
 
+import org.springframework.util.CollectionUtils;
+
 /**
  * Router request interceptor for rule based router.
- * @author lepdou 2022-07-06
+ * @author lepdou, Hoatian Zhang
  */
 public class RuleBasedRouterRequestInterceptor implements RouterRequestInterceptor {
 
@@ -44,16 +49,21 @@ public class RuleBasedRouterRequestInterceptor implements RouterRequestIntercept
 		boolean ruleBasedRouterEnabled = polarisRuleBasedRouterProperties.isEnabled();
 
 		// set dynamic switch for rule based router
-		Map<String, String> metadata = new HashMap<>();
-		metadata.put(RuleBasedRouter.ROUTER_ENABLED, String.valueOf(ruleBasedRouterEnabled));
-		request.addRouterMetadata(RuleBasedRouter.ROUTER_TYPE_RULE_BASED, metadata);
+		Set<RouteArgument> routeArguments = new HashSet<>();
+		routeArguments.add(RouteArgument.buildCustom(RuleBasedRouter.ROUTER_ENABLED, String.valueOf(ruleBasedRouterEnabled)));
 
 		// The label information that the rule based routing depends on
 		// is placed in the metadata of the source service for transmission.
 		// Later, can consider putting it in routerMetadata like other routers.
 		if (ruleBasedRouterEnabled) {
-			Map<String, String> ruleRouterLabels = routerContext.getLabels(PolarisRouterContext.ROUTER_LABELS);
-			request.getSourceService().setMetadata(ruleRouterLabels);
+			Map<String, String> ruleRouterLabels = routerContext.getLabels(RouterConstant.ROUTER_LABELS);
+			if (!CollectionUtils.isEmpty(ruleRouterLabels)) {
+				for (Map.Entry<String, String> label : ruleRouterLabels.entrySet()) {
+					routeArguments.add(RouteArgument.fromLabel(label.getKey(), label.getValue()));
+				}
+			}
 		}
+
+		request.putRouterArgument(RuleBasedRouter.ROUTER_TYPE_RULE_BASED, routeArguments);
 	}
 }

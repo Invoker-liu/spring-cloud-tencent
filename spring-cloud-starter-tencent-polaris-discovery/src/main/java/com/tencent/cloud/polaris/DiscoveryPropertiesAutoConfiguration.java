@@ -18,13 +18,17 @@
 package com.tencent.cloud.polaris;
 
 import com.tencent.cloud.polaris.context.ConditionalOnPolarisEnabled;
+import com.tencent.cloud.polaris.context.PolarisSDKContextManager;
 import com.tencent.cloud.polaris.discovery.PolarisDiscoveryHandler;
+import com.tencent.cloud.polaris.extend.consul.ConsulConfigModifier;
 import com.tencent.cloud.polaris.extend.consul.ConsulContextProperties;
+import com.tencent.cloud.polaris.extend.nacos.NacosConfigModifier;
+import com.tencent.cloud.polaris.extend.nacos.NacosContextProperties;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 
 /**
  * Common configuration of discovery.
@@ -33,17 +37,54 @@ import org.springframework.context.annotation.Import;
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnPolarisEnabled
-@Import({PolarisDiscoveryProperties.class, ConsulContextProperties.class})
 public class DiscoveryPropertiesAutoConfiguration {
 
 	@Bean
 	@ConditionalOnMissingBean
-	public PolarisDiscoveryHandler polarisDiscoveryHandler() {
-		return new PolarisDiscoveryHandler();
+	public PolarisDiscoveryProperties polarisDiscoveryProperties() {
+		return new PolarisDiscoveryProperties();
 	}
 
 	@Bean
-	public DiscoveryConfigModifier discoveryConfigModifier() {
-		return new DiscoveryConfigModifier();
+	@ConditionalOnMissingBean
+	public ConsulContextProperties consulContextProperties() {
+		return new ConsulContextProperties();
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public NacosContextProperties nacosContextProperties() {
+		return new NacosContextProperties();
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public PolarisDiscoveryHandler polarisDiscoveryHandler(PolarisDiscoveryProperties polarisDiscoveryProperties,
+			PolarisSDKContextManager polarisSDKContextManager) {
+		return new PolarisDiscoveryHandler(polarisDiscoveryProperties, polarisSDKContextManager);
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public DiscoveryConfigModifier discoveryConfigModifier(PolarisDiscoveryProperties polarisDiscoveryProperties) {
+		return new DiscoveryConfigModifier(polarisDiscoveryProperties);
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public ConsulConfigModifier consulConfigModifier(@Autowired(required = false) ConsulContextProperties consulContextProperties) {
+		return new ConsulConfigModifier(consulContextProperties);
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public PolarisDiscoveryConfigModifier polarisDiscoveryConfigModifier(PolarisDiscoveryProperties polarisDiscoveryProperties) {
+		return new PolarisDiscoveryConfigModifier(polarisDiscoveryProperties);
+	}
+
+	@Bean
+	@ConditionalOnMissingBean
+	public NacosConfigModifier nacosConfigModifier(@Autowired(required = false) NacosContextProperties nacosContextProperties) {
+		return new NacosConfigModifier(nacosContextProperties);
 	}
 }

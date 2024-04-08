@@ -27,11 +27,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.tencent.cloud.common.constant.RouterConstants;
+import com.tencent.cloud.common.constant.OrderConstant;
+import com.tencent.cloud.common.constant.RouterConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.metadata.StaticMetadataManager;
 import com.tencent.cloud.common.util.JacksonUtils;
+import com.tencent.cloud.common.util.expresstion.ExpressionLabelUtils;
+import com.tencent.cloud.polaris.context.config.PolarisContextProperties;
 import com.tencent.cloud.polaris.router.RouterRuleLabelResolver;
 import com.tencent.cloud.polaris.router.spi.FeignRouterLabelResolver;
 import feign.RequestInterceptor;
@@ -47,7 +50,7 @@ import static com.tencent.cloud.common.constant.ContextConstant.UTF_8;
 /**
  * Resolver labels from request.
  *
- *@author lepdou 2022-05-12
+ * @author lepdou, Hoatian Zhang
  */
 public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered {
 	private static final Logger LOGGER = LoggerFactory.getLogger(RouterLabelFeignInterceptor.class);
@@ -55,10 +58,12 @@ public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered 
 	private final List<FeignRouterLabelResolver> routerLabelResolvers;
 	private final StaticMetadataManager staticMetadataManager;
 	private final RouterRuleLabelResolver routerRuleLabelResolver;
+	private final PolarisContextProperties polarisContextProperties;
 
 	public RouterLabelFeignInterceptor(List<FeignRouterLabelResolver> routerLabelResolvers,
 			StaticMetadataManager staticMetadataManager,
-			RouterRuleLabelResolver routerRuleLabelResolver) {
+			RouterRuleLabelResolver routerRuleLabelResolver,
+			PolarisContextProperties polarisContextProperties) {
 		if (!CollectionUtils.isEmpty(routerLabelResolvers)) {
 			routerLabelResolvers.sort(Comparator.comparingInt(Ordered::getOrder));
 			this.routerLabelResolvers = routerLabelResolvers;
@@ -68,11 +73,12 @@ public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered 
 		}
 		this.staticMetadataManager = staticMetadataManager;
 		this.routerRuleLabelResolver = routerRuleLabelResolver;
+		this.polarisContextProperties = polarisContextProperties;
 	}
 
 	@Override
 	public int getOrder() {
-		return 0;
+		return OrderConstant.Client.Feign.ROUTER_LABEL_INTERCEPTOR_ORDER;
 	}
 
 	@Override
@@ -104,8 +110,7 @@ public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered 
 		}
 
 		// labels from downstream
-		Map<String, String> transitiveLabels = MetadataContextHolder.get()
-				.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE);
+		Map<String, String> transitiveLabels = MetadataContextHolder.get().getTransitiveMetadata();
 		labels.putAll(transitiveLabels);
 
 		// pass label by header
@@ -116,7 +121,7 @@ public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered 
 		catch (UnsupportedEncodingException e) {
 			throw new RuntimeException("unsupported charset exception " + UTF_8);
 		}
-		requestTemplate.header(RouterConstants.ROUTER_LABEL_HEADER, encodedLabelsContent);
+		requestTemplate.header(RouterConstant.ROUTER_LABEL_HEADER, encodedLabelsContent);
 	}
 
 	private Map<String, String> getRuleExpressionLabels(RequestTemplate requestTemplate, Set<String> labelKeys) {
@@ -124,6 +129,16 @@ public class RouterLabelFeignInterceptor implements RequestInterceptor, Ordered 
 			return Collections.emptyMap();
 		}
 
-		return FeignExpressionLabelUtils.resolve(requestTemplate, labelKeys);
+		//enrich labels from request
+		Map<String, String> labels = FeignExpressionLabelUtils.resolve(requestTemplate, labelKeys);
+
+		//enrich caller ip label
+		for (String labelKey : labelKeys) {
+			if (ExpressionLabelUtils.isCallerIPLabel(labelKey)) {
+				labels.put(labelKey, polarisContextProperties.getLocalIpAddress());
+			}
+		}
+
+		return labels;
 	}
 }

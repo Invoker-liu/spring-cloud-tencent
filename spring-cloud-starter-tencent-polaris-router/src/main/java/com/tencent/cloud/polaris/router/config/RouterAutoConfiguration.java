@@ -18,9 +18,14 @@
 
 package com.tencent.cloud.polaris.router.config;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import com.tencent.cloud.common.metadata.StaticMetadataManager;
 import com.tencent.cloud.polaris.context.ServiceRuleManager;
+import com.tencent.cloud.polaris.context.config.PolarisContextProperties;
 import com.tencent.cloud.polaris.router.RouterRuleLabelResolver;
-import com.tencent.cloud.polaris.router.beanprocessor.LoadBalancerInterceptorBeanPostProcessor;
 import com.tencent.cloud.polaris.router.beanprocessor.ReactiveLoadBalancerClientFilterBeanPostProcessor;
 import com.tencent.cloud.polaris.router.config.properties.PolarisMetadataRouterProperties;
 import com.tencent.cloud.polaris.router.config.properties.PolarisNearByRouterProperties;
@@ -28,7 +33,12 @@ import com.tencent.cloud.polaris.router.config.properties.PolarisRuleBasedRouter
 import com.tencent.cloud.polaris.router.interceptor.MetadataRouterRequestInterceptor;
 import com.tencent.cloud.polaris.router.interceptor.NearbyRouterRequestInterceptor;
 import com.tencent.cloud.polaris.router.interceptor.RuleBasedRouterRequestInterceptor;
+import com.tencent.cloud.polaris.router.resttemplate.RouterLabelRestTemplateInterceptor;
+import com.tencent.cloud.polaris.router.spi.SpringWebRouterLabelResolver;
+import com.tencent.cloud.rpc.enhancement.resttemplate.EnhancedRestTemplateInterceptor;
 
+import org.springframework.beans.factory.SmartInitializingSingleton;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClients;
@@ -36,6 +46,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.client.ClientHttpRequestInterceptor;
+import org.springframework.web.client.RestTemplate;
 
 import static org.springframework.core.Ordered.HIGHEST_PRECEDENCE;
 
@@ -45,16 +57,10 @@ import static org.springframework.core.Ordered.HIGHEST_PRECEDENCE;
  *@author lepdou 2022-05-11
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnPolarisRouterEnabled
 @LoadBalancerClients(defaultConfiguration = LoadBalancerConfiguration.class)
 @Import({PolarisNearByRouterProperties.class, PolarisMetadataRouterProperties.class, PolarisRuleBasedRouterProperties.class})
 public class RouterAutoConfiguration {
-
-	@Bean
-	@Order(HIGHEST_PRECEDENCE)
-	@ConditionalOnClass(name = "org.springframework.cloud.client.loadbalancer.LoadBalancerInterceptor")
-	public LoadBalancerInterceptorBeanPostProcessor loadBalancerInterceptorBeanPostProcessor() {
-		return new LoadBalancerInterceptorBeanPostProcessor();
-	}
 
 	@Bean
 	@Order(HIGHEST_PRECEDENCE)
@@ -84,5 +90,43 @@ public class RouterAutoConfiguration {
 	@ConditionalOnProperty(value = "spring.cloud.polaris.router.rule-router.enabled", matchIfMissing = true)
 	public RuleBasedRouterRequestInterceptor ruleBasedRouterRequestInterceptor(PolarisRuleBasedRouterProperties polarisRuleBasedRouterProperties) {
 		return new RuleBasedRouterRequestInterceptor(polarisRuleBasedRouterProperties);
+	}
+
+	/**
+	 * Create when RestTemplate exists.
+	 * @author liuye 2022-09-14
+	 */
+	@Configuration(proxyBeanMethods = false)
+	@ConditionalOnClass(name = "org.springframework.web.client.RestTemplate")
+	@ConditionalOnProperty(value = "spring.cloud.polaris.router.rule-router.enabled", matchIfMissing = true)
+	protected static class RouterLabelRestTemplateConfig {
+
+		@Autowired(required = false)
+		private List<RestTemplate> restTemplates = Collections.emptyList();
+
+		@Bean
+		public RouterLabelRestTemplateInterceptor routerLabelRestTemplateInterceptor(
+				List<SpringWebRouterLabelResolver> routerLabelResolvers,
+				StaticMetadataManager staticMetadataManager,
+				RouterRuleLabelResolver routerRuleLabelResolver,
+				PolarisContextProperties polarisContextProperties) {
+			return new RouterLabelRestTemplateInterceptor(routerLabelResolvers, staticMetadataManager,
+					routerRuleLabelResolver, polarisContextProperties);
+		}
+
+		@Bean
+		public SmartInitializingSingleton addRouterLabelInterceptorForRestTemplate(RouterLabelRestTemplateInterceptor interceptor) {
+			return () -> restTemplates.forEach(restTemplate -> {
+				List<ClientHttpRequestInterceptor> list = new ArrayList<>(restTemplate.getInterceptors());
+				int addIndex = list.size();
+				for (int i = 0; i < list.size(); i++) {
+					if (list.get(i) instanceof EnhancedRestTemplateInterceptor) {
+						addIndex = i;
+					}
+				}
+				list.add(addIndex, interceptor);
+				restTemplate.setInterceptors(list);
+			});
+		}
 	}
 }

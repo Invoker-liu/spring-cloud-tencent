@@ -26,9 +26,9 @@ import com.tencent.cloud.common.metadata.config.MetadataLocalProperties;
 import com.tencent.cloud.common.util.ApplicationContextAwareUtils;
 
 import org.springframework.util.CollectionUtils;
+import org.springframework.util.StringUtils;
 
 import static com.tencent.cloud.common.metadata.MetadataContext.FRAGMENT_DISPOSABLE;
-import static com.tencent.cloud.common.metadata.MetadataContext.FRAGMENT_TRANSITIVE;
 import static com.tencent.cloud.common.metadata.MetadataContext.FRAGMENT_UPSTREAM_DISPOSABLE;
 
 /**
@@ -65,8 +65,12 @@ public final class MetadataContextHolder {
 
 		// init static transitive metadata
 		MetadataContext metadataContext = new MetadataContext();
-		metadataContext.putFragmentContext(FRAGMENT_TRANSITIVE, staticMetadataManager.getMergedStaticTransitiveMetadata());
-		metadataContext.putFragmentContext(FRAGMENT_DISPOSABLE, staticMetadataManager.getMergedStaticDisposableMetadata());
+		metadataContext.setTransitiveMetadata(staticMetadataManager.getMergedStaticTransitiveMetadata());
+		metadataContext.setDisposableMetadata(staticMetadataManager.getMergedStaticDisposableMetadata());
+
+		if (StringUtils.hasText(staticMetadataManager.getTransHeader())) {
+			metadataContext.setTransHeaders(staticMetadataManager.getTransHeader(), "");
+		}
 
 		METADATA_CONTEXT.set(metadataContext);
 
@@ -126,18 +130,18 @@ public final class MetadataContextHolder {
 
 		// Save transitive metadata to ThreadLocal.
 		if (!CollectionUtils.isEmpty(dynamicTransitiveMetadata)) {
-			Map<String, String> staticTransitiveMetadata = metadataContext.getFragmentContext(FRAGMENT_TRANSITIVE);
+			Map<String, String> staticTransitiveMetadata = metadataContext.getTransitiveMetadata();
 			Map<String, String> mergedTransitiveMetadata = new HashMap<>();
 			mergedTransitiveMetadata.putAll(staticTransitiveMetadata);
 			mergedTransitiveMetadata.putAll(dynamicTransitiveMetadata);
-			metadataContext.putFragmentContext(FRAGMENT_TRANSITIVE, Collections.unmodifiableMap(mergedTransitiveMetadata));
-
-			Map<String, String> mergedDisposableMetadata = new HashMap<>(dynamicDisposableMetadata);
-			metadataContext.putFragmentContext(FRAGMENT_UPSTREAM_DISPOSABLE, Collections.unmodifiableMap(mergedDisposableMetadata));
-
-			Map<String, String> staticDisposableMetadata = metadataContext.getFragmentContext(FRAGMENT_DISPOSABLE);
-			metadataContext.putFragmentContext(FRAGMENT_DISPOSABLE, Collections.unmodifiableMap(staticDisposableMetadata));
+			metadataContext.setTransitiveMetadata(Collections.unmodifiableMap(mergedTransitiveMetadata));
 		}
+		if (!CollectionUtils.isEmpty(dynamicDisposableMetadata)) {
+			Map<String, String> mergedUpstreamDisposableMetadata = new HashMap<>(dynamicDisposableMetadata);
+			metadataContext.setUpstreamDisposableMetadata(Collections.unmodifiableMap(mergedUpstreamDisposableMetadata));
+		}
+		Map<String, String> staticDisposableMetadata = metadataContext.getDisposableMetadata();
+		metadataContext.setDisposableMetadata(Collections.unmodifiableMap(staticDisposableMetadata));
 		MetadataContextHolder.set(metadataContext);
 	}
 

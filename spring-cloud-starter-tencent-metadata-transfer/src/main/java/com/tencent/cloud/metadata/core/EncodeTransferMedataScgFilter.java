@@ -20,10 +20,10 @@ package com.tencent.cloud.metadata.core;
 
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
-import java.util.HashMap;
 import java.util.Map;
 
 import com.tencent.cloud.common.constant.MetadataConstant;
+import com.tencent.cloud.common.constant.OrderConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.util.JacksonUtils;
@@ -39,7 +39,6 @@ import org.springframework.web.server.ServerWebExchange;
 import static com.tencent.cloud.common.constant.ContextConstant.UTF_8;
 import static com.tencent.cloud.common.constant.MetadataConstant.HeaderName.CUSTOM_DISPOSABLE_METADATA;
 import static com.tencent.cloud.common.constant.MetadataConstant.HeaderName.CUSTOM_METADATA;
-import static org.springframework.cloud.gateway.filter.ReactiveLoadBalancerClientFilter.LOAD_BALANCER_CLIENT_FILTER_ORDER;
 
 /**
  * Scg filter used for writing metadata in HTTP request header.
@@ -48,11 +47,9 @@ import static org.springframework.cloud.gateway.filter.ReactiveLoadBalancerClien
  */
 public class EncodeTransferMedataScgFilter implements GlobalFilter, Ordered {
 
-	private static final int METADATA_SCG_FILTER_ORDER = LOAD_BALANCER_CLIENT_FILTER_ORDER + 1;
-
 	@Override
 	public int getOrder() {
-		return METADATA_SCG_FILTER_ORDER;
+		return OrderConstant.Client.Scg.ENCODE_TRANSFER_METADATA_FILTER_ORDER;
 	}
 
 	@Override
@@ -66,20 +63,13 @@ public class EncodeTransferMedataScgFilter implements GlobalFilter, Ordered {
 			metadataContext = MetadataContextHolder.get();
 		}
 
-		Map<String, String> customMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE);
-		Map<String, String> disposableMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_DISPOSABLE);
+		Map<String, String> customMetadata = metadataContext.getCustomMetadata();
+		Map<String, String> disposableMetadata = metadataContext.getDisposableMetadata();
 
-		// Clean upstream disposable metadata.
-		Map<String, String> newestCustomMetadata = new HashMap<>();
-		customMetadata.forEach((key, value) -> {
-			if (!disposableMetadata.containsKey(key)) {
-				newestCustomMetadata.put(key, value);
-			}
-		});
-
-		this.buildMetadataHeader(builder, newestCustomMetadata, CUSTOM_METADATA);
+		this.buildMetadataHeader(builder, customMetadata, CUSTOM_METADATA);
 		this.buildMetadataHeader(builder, disposableMetadata, CUSTOM_DISPOSABLE_METADATA);
 
+		TransHeadersTransfer.transfer(exchange.getRequest());
 		return chain.filter(exchange.mutate().request(builder.build()).build());
 	}
 

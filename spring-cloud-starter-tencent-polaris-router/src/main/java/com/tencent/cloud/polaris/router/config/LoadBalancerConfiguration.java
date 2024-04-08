@@ -20,10 +20,11 @@ package com.tencent.cloud.polaris.router.config;
 
 import java.util.List;
 
+import com.tencent.cloud.polaris.context.PolarisSDKContextManager;
 import com.tencent.cloud.polaris.router.PolarisRouterServiceInstanceListSupplier;
 import com.tencent.cloud.polaris.router.spi.RouterRequestInterceptor;
 import com.tencent.cloud.polaris.router.spi.RouterResponseInterceptor;
-import com.tencent.polaris.router.api.core.RouterAPI;
+import com.tencent.cloud.rpc.enhancement.transformer.InstanceTransformer;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.cloud.client.ConditionalOnBlockingDiscoveryEnabled;
@@ -42,6 +43,7 @@ import org.springframework.core.annotation.Order;
  * @author lepdou 2022-05-17
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnPolarisRouterEnabled
 @ConditionalOnDiscoveryEnabled
 public class LoadBalancerConfiguration {
 
@@ -59,13 +61,14 @@ public class LoadBalancerConfiguration {
 		@ConditionalOnBean(ReactiveDiscoveryClient.class)
 		public ServiceInstanceListSupplier polarisRouterDiscoveryClientServiceInstanceListSupplier(
 				ConfigurableApplicationContext context,
-				RouterAPI routerAPI, List<RouterRequestInterceptor> requestInterceptors,
-				List<RouterResponseInterceptor> responseInterceptors) {
+				PolarisSDKContextManager polarisSDKContextManager, List<RouterRequestInterceptor> requestInterceptors,
+				List<RouterResponseInterceptor> responseInterceptors, InstanceTransformer instanceTransformer) {
 			return new PolarisRouterServiceInstanceListSupplier(
 					ServiceInstanceListSupplier.builder().withDiscoveryClient().build(context),
-					routerAPI,
+					polarisSDKContextManager.getRouterAPI(),
 					requestInterceptors,
-					responseInterceptors);
+					responseInterceptors,
+					instanceTransformer);
 		}
 
 	}
@@ -79,13 +82,14 @@ public class LoadBalancerConfiguration {
 		@ConditionalOnBean(DiscoveryClient.class)
 		public ServiceInstanceListSupplier polarisRouterDiscoveryClientServiceInstanceListSupplier(
 				ConfigurableApplicationContext context,
-				RouterAPI routerAPI, List<RouterRequestInterceptor> requestInterceptors,
-				List<RouterResponseInterceptor> responseInterceptors) {
+				PolarisSDKContextManager polarisSDKContextManager, List<RouterRequestInterceptor> requestInterceptors,
+				List<RouterResponseInterceptor> responseInterceptors, InstanceTransformer instanceTransformer) {
 			return new PolarisRouterServiceInstanceListSupplier(
 					ServiceInstanceListSupplier.builder().withBlockingDiscoveryClient().build(context),
-					routerAPI,
+					polarisSDKContextManager.getRouterAPI(),
 					requestInterceptors,
-					responseInterceptors);
+					responseInterceptors,
+					instanceTransformer);
 		}
 	}
 }

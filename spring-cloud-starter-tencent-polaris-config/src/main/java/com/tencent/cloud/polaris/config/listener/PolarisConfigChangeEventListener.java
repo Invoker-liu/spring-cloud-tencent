@@ -19,20 +19,27 @@
 package com.tencent.cloud.polaris.config.listener;
 
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.collect.Maps;
+import com.tencent.cloud.polaris.config.spring.event.ConfigChangeSpringEvent;
 import com.tencent.polaris.configuration.api.core.ConfigPropertyChangeInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.cloud.context.environment.EnvironmentChangeEvent;
 import org.springframework.context.ApplicationEvent;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.ApplicationEventPublisherAware;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.Environment;
 import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.StandardEnvironment;
 import org.springframework.lang.NonNull;
 
 import static com.tencent.cloud.polaris.config.listener.PolarisConfigListenerContext.fireConfigChange;
@@ -44,9 +51,13 @@ import static com.tencent.cloud.polaris.config.listener.PolarisConfigListenerCon
  *
  * @author <a href="mailto:iskp.me@gmail.com">Elve.Xu</a> 2022-06-08
  */
-public final class PolarisConfigChangeEventListener implements ApplicationListener<ApplicationEvent> {
+public final class PolarisConfigChangeEventListener implements ApplicationListener<ApplicationEvent>, ApplicationEventPublisherAware {
+
+	private static final Logger LOG = LoggerFactory.getLogger(PolarisConfigChangeEventListener.class);
 
 	private static final AtomicBoolean started = new AtomicBoolean();
+
+	private ApplicationEventPublisher eventPublisher;
 
 	/**
 	 * Handle an application event.
@@ -72,7 +83,9 @@ public final class PolarisConfigChangeEventListener implements ApplicationListen
 			ConfigurableEnvironment environment = context.getEnvironment();
 			Map<String, Object> ret = loadEnvironmentProperties(environment);
 			Map<String, ConfigPropertyChangeInfo> changes = merge(ret);
-			fireConfigChange(changes.keySet(), Maps.newHashMap(changes));
+			ConfigChangeSpringEvent configChangeSpringEvent = new ConfigChangeSpringEvent(new HashMap<>(changes));
+			eventPublisher.publishEvent(configChangeSpringEvent);
+			fireConfigChange(changes.keySet(), new HashMap<>(changes));
 			changes.clear();
 		}
 	}
@@ -87,12 +100,23 @@ public final class PolarisConfigChangeEventListener implements ApplicationListen
 		Map<String, Object> ret = Maps.newHashMap();
 		MutablePropertySources sources = environment.getPropertySources();
 		sources.iterator().forEachRemaining(propertySource -> {
+			// Don't read system env variable.
+			if (StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME.equals(propertySource.getName())) {
+				return;
+			}
+
 			Object o = propertySource.getSource();
 			if (o instanceof Map) {
 				for (Map.Entry<String, Object> entry : ((Map<String, Object>) o).entrySet()) {
 					String key = entry.getKey();
-					String value = environment.getProperty(key);
-					ret.put(key, value);
+					try {
+						String value = environment.getProperty(key);
+						ret.put(key, value);
+					}
+					catch (Exception e) {
+						LOG.warn("Read property from {} with key {} failed.", propertySource.getName(), key, e);
+					}
+
 				}
 			}
 			else if (o instanceof Collection) {
@@ -105,5 +129,10 @@ public final class PolarisConfigChangeEventListener implements ApplicationListen
 			}
 		});
 		return ret;
+	}
+
+	@Override
+	public void setApplicationEventPublisher(ApplicationEventPublisher eventPublisher) {
+		this.eventPublisher = eventPublisher;
 	}
 }

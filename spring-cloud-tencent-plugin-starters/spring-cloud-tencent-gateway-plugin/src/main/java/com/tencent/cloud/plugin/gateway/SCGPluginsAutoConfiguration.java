@@ -20,13 +20,14 @@ package com.tencent.cloud.plugin.gateway;
 
 import java.util.List;
 
-import com.tencent.cloud.plugin.gateway.staining.StainingProperties;
 import com.tencent.cloud.plugin.gateway.staining.TrafficStainer;
 import com.tencent.cloud.plugin.gateway.staining.TrafficStainingGatewayFilter;
 import com.tencent.cloud.plugin.gateway.staining.rule.RuleStainingExecutor;
 import com.tencent.cloud.plugin.gateway.staining.rule.RuleStainingProperties;
 import com.tencent.cloud.plugin.gateway.staining.rule.RuleTrafficStainer;
 import com.tencent.cloud.plugin.gateway.staining.rule.StainingRuleManager;
+import com.tencent.cloud.polaris.config.ConditionalOnPolarisConfigEnabled;
+import com.tencent.cloud.polaris.context.ConditionalOnPolarisEnabled;
 import com.tencent.polaris.configuration.api.core.ConfigFileService;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -38,47 +39,38 @@ import org.springframework.context.annotation.Configuration;
  * @author lepdou 2022-07-06
  */
 @Configuration
+@ConditionalOnPolarisEnabled
 @ConditionalOnProperty(value = "spring.cloud.tencent.plugin.scg.enabled", matchIfMissing = true)
 public class SCGPluginsAutoConfiguration {
 
 	@Configuration
-	@ConditionalOnProperty("spring.cloud.tencent.plugin.scg.staining.enabled")
-	public static class StainingPluginConfiguration {
+	@ConditionalOnProperty("spring.cloud.tencent.plugin.scg.staining.rule-staining.enabled")
+	@ConditionalOnPolarisConfigEnabled
+	public static class RuleStainingPluginConfiguration {
 
 		@Bean
-		public StainingProperties stainingProperties() {
-			return new StainingProperties();
+		public RuleStainingProperties ruleStainingProperties() {
+			return new RuleStainingProperties();
 		}
 
-		@Configuration
-		@ConditionalOnProperty(value = "spring.cloud.tencent.plugin.scg.staining.rule-staining.enabled", matchIfMissing = true)
-		public static class RuleStainingPluginConfiguration {
+		@Bean
+		public StainingRuleManager stainingRuleManager(RuleStainingProperties stainingProperties, ConfigFileService configFileService) {
+			return new StainingRuleManager(stainingProperties, configFileService);
+		}
 
-			@Bean
-			public RuleStainingProperties ruleStainingProperties() {
-				return new RuleStainingProperties();
-			}
+		@Bean
+		public TrafficStainingGatewayFilter trafficStainingGatewayFilter(List<TrafficStainer> trafficStainer) {
+			return new TrafficStainingGatewayFilter(trafficStainer);
+		}
 
-			@Bean
-			public StainingRuleManager stainingRuleManager(RuleStainingProperties stainingProperties, ConfigFileService configFileService) {
-				return new StainingRuleManager(stainingProperties, configFileService);
-			}
+		@Bean
+		public RuleStainingExecutor ruleStainingExecutor() {
+			return new RuleStainingExecutor();
+		}
 
-			@Bean
-			public TrafficStainingGatewayFilter trafficStainingGatewayFilter(List<TrafficStainer> trafficStainer) {
-				return new TrafficStainingGatewayFilter(trafficStainer);
-			}
-
-			@Bean
-			public RuleStainingExecutor ruleStainingExecutor() {
-				return new RuleStainingExecutor();
-			}
-
-			@Bean
-			public RuleTrafficStainer ruleTrafficStainer(StainingRuleManager stainingRuleManager,
-					RuleStainingExecutor ruleStainingExecutor) {
-				return new RuleTrafficStainer(stainingRuleManager, ruleStainingExecutor);
-			}
+		@Bean
+		public RuleTrafficStainer ruleTrafficStainer(StainingRuleManager stainingRuleManager, RuleStainingExecutor ruleStainingExecutor) {
+			return new RuleTrafficStainer(stainingRuleManager, ruleStainingExecutor);
 		}
 	}
 }

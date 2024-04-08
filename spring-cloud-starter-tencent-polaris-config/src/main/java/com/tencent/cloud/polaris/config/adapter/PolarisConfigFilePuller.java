@@ -43,7 +43,7 @@ import org.springframework.util.StringUtils;
 /**
  * PolarisConfigFilePuller pull configFile from Polaris.
  *
- * @author wlx
+ * @author wlx, youta
  */
 public final class PolarisConfigFilePuller {
 
@@ -81,6 +81,7 @@ public final class PolarisConfigFilePuller {
 	 *
 	 * @param compositePropertySource compositePropertySource
 	 * @param activeProfiles          activeProfiles
+	 * @param defaultProfiles         defaultProfiles
 	 * @param serviceName             serviceName
 	 */
 	public void initInternalConfigFiles(CompositePropertySource compositePropertySource, String[] activeProfiles,
@@ -196,10 +197,12 @@ public final class PolarisConfigFilePuller {
 			}
 			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application-" + profile + ".properties"));
 			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application-" + profile + ".yml"));
+			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application-" + profile + ".yaml"));
 		}
 		// build default config properties files.
 		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application.properties"));
 		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application.yml"));
+		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "application.yaml"));
 	}
 
 	private void buildInternalBootstrapConfigFiles(
@@ -210,9 +213,11 @@ public final class PolarisConfigFilePuller {
 			}
 			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap-" + profile + ".properties"));
 			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap-" + profile + ".yml"));
+			internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap-" + profile + ".yaml"));
 		}
 		// build default config properties files.
 		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap.properties"));
 		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap.yml"));
+		internalConfigFiles.add(new DefaultConfigFileMetadata(namespace, serviceName, "bootstrap.yaml"));
 	}
 }

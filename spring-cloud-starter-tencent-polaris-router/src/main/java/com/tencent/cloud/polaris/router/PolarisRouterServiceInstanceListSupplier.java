@@ -27,15 +27,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import com.tencent.cloud.common.constant.RouterConstants;
+import com.tencent.cloud.common.constant.RouterConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.pojo.PolarisServiceInstance;
 import com.tencent.cloud.common.util.JacksonUtils;
-import com.tencent.cloud.polaris.loadbalancer.LoadBalancerUtils;
 import com.tencent.cloud.polaris.router.resttemplate.PolarisLoadBalancerRequest;
 import com.tencent.cloud.polaris.router.spi.RouterRequestInterceptor;
 import com.tencent.cloud.polaris.router.spi.RouterResponseInterceptor;
+import com.tencent.cloud.rpc.enhancement.transformer.InstanceTransformer;
 import com.tencent.polaris.api.exception.ErrorCode;
 import com.tencent.polaris.api.exception.PolarisException;
 import com.tencent.polaris.api.pojo.Instance;
@@ -59,11 +59,11 @@ import static com.tencent.cloud.common.constant.ContextConstant.UTF_8;
 
 /**
  * Service routing entrance.
- *
+ * <p>
  * Rule routing needs to rely on request parameters for server filtering.
  * The interface cannot obtain the context object of the request granularity,
  * so the routing capability cannot be achieved through ServerListFilter.
- *
+ * <p>
  * And {@link PolarisRouterServiceInstanceListSupplier#get(Request)} provides the ability to pass in http headers,
  * so routing capabilities are implemented through IRule.
  *
@@ -74,14 +74,16 @@ public class PolarisRouterServiceInstanceListSupplier extends DelegatingServiceI
 	private final RouterAPI routerAPI;
 	private final List<RouterRequestInterceptor> requestInterceptors;
 	private final List<RouterResponseInterceptor> responseInterceptors;
+	private final InstanceTransformer instanceTransformer;
 
 	public PolarisRouterServiceInstanceListSupplier(ServiceInstanceListSupplier delegate,
 			RouterAPI routerAPI, List<RouterRequestInterceptor> requestInterceptors,
-			List<RouterResponseInterceptor> responseInterceptors) {
+			List<RouterResponseInterceptor> responseInterceptors, InstanceTransformer instanceTransformer) {
 		super(delegate);
 		this.routerAPI = routerAPI;
 		this.requestInterceptors = requestInterceptors;
 		this.responseInterceptors = responseInterceptors;
+		this.instanceTransformer = instanceTransformer;
 	}
 
 	@Override
@@ -95,21 +97,29 @@ public class PolarisRouterServiceInstanceListSupplier extends DelegatingServiceI
 		Flux<List<ServiceInstance>> allServers = getDelegate().get();
 
 		// 2. filter by router
+		PolarisRouterContext routerContext = null;
+
 		DefaultRequestContext requestContext = (DefaultRequestContext) request.getContext();
-		PolarisRouterContext key = null;
-		if (requestContext instanceof RequestDataContext) {
-			key = buildRouterContext(((RequestDataContext) requestContext).getClientRequest().getHeaders());
+		if (requestContext != null) {
+			if (requestContext instanceof RequestDataContext) {
+				routerContext = buildRouterContext(((RequestDataContext) requestContext).getClientRequest().getHeaders());
+			}
+			else if (requestContext.getClientRequest() instanceof PolarisLoadBalancerRequest) {
+				routerContext = buildRouterContext(((PolarisLoadBalancerRequest<?>) requestContext.getClientRequest()).getRequest()
+						.getHeaders());
+			}
 		}
-		else if (requestContext.getClientRequest() instanceof PolarisLoadBalancerRequest) {
-			key = buildRouterContext(((PolarisLoadBalancerRequest<?>) requestContext.getClientRequest()).getRequest()
-					.getHeaders());
+
+		if (routerContext == null) {
+			// return all servers if router context is null.
+			return allServers;
 		}
-		return doRouter(allServers, key);
+
+		return doRouter(allServers, routerContext);
 	}
 
-	//set method to public for unit test
 	PolarisRouterContext buildRouterContext(HttpHeaders headers) {
-		Collection<String> labelHeaderValues = headers.get(RouterConstants.ROUTER_LABEL_HEADER);
+		Collection<String> labelHeaderValues = headers.get(RouterConstant.ROUTER_LABEL_HEADER);
 
 		if (CollectionUtils.isEmpty(labelHeaderValues)) {
 			return null;
@@ -117,8 +127,7 @@ public class PolarisRouterServiceInstanceListSupplier extends DelegatingServiceI
 
 		PolarisRouterContext routerContext = new PolarisRouterContext();
 
-		routerContext.putLabels(PolarisRouterContext.TRANSITIVE_LABELS, MetadataContextHolder.get()
-				.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE));
+		routerContext.putLabels(RouterConstant.TRANSITIVE_LABELS, MetadataContextHolder.get().getTransitiveMetadata());
 
 		Map<String, String> labelHeaderValuesMap = new HashMap<>();
 		try {
@@ -132,30 +141,32 @@ public class PolarisRouterServiceInstanceListSupplier extends DelegatingServiceI
 		catch (UnsupportedEncodingException e) {
 			throw new RuntimeException("unsupported charset exception " + UTF_8);
 		}
-		routerContext.putLabels(PolarisRouterContext.ROUTER_LABELS, labelHeaderValuesMap);
+		routerContext.putLabels(RouterConstant.ROUTER_LABELS, labelHeaderValuesMap);
 		return routerContext;
 	}
 
 	Flux<List<ServiceInstance>> doRouter(Flux<List<ServiceInstance>> allServers, PolarisRouterContext routerContext) {
-		ServiceInstances serviceInstances = LoadBalancerUtils.transferServersToServiceInstances(allServers);
+		ServiceInstances serviceInstances = RouterUtils.transferServersToServiceInstances(allServers, instanceTransformer);
 
-		// filter instance by routers
-		ProcessRoutersRequest processRoutersRequest = buildProcessRoutersRequest(serviceInstances, routerContext);
-
-		// process request interceptors
-		processRouterRequestInterceptors(processRoutersRequest, routerContext);
-
-		// process router chain
-		ProcessRoutersResponse processRoutersResponse = routerAPI.processRouters(processRoutersRequest);
-
-		// process response interceptors
-		processRouterResponseInterceptors(routerContext, processRoutersResponse);
-
-		// transfer polaris server to ServiceInstance
 		List<ServiceInstance> filteredInstances = new ArrayList<>();
-		ServiceInstances filteredServiceInstances = processRoutersResponse.getServiceInstances();
-		for (Instance instance : filteredServiceInstances.getInstances()) {
-			filteredInstances.add(new PolarisServiceInstance(instance));
+		if (serviceInstances.getInstances().size() > 0) {
+			// filter instance by routers
+			ProcessRoutersRequest processRoutersRequest = buildProcessRoutersRequest(serviceInstances, routerContext);
+
+			// process request interceptors
+			processRouterRequestInterceptors(processRoutersRequest, routerContext);
+
+			// process router chain
+			ProcessRoutersResponse processRoutersResponse = routerAPI.processRouters(processRoutersRequest);
+
+			// process response interceptors
+			processRouterResponseInterceptors(routerContext, processRoutersResponse);
+
+			// transfer polaris server to ServiceInstance
+			ServiceInstances filteredServiceInstances = processRoutersResponse.getServiceInstances();
+			for (Instance instance : filteredServiceInstances.getInstances()) {
+				filteredInstances.add(new PolarisServiceInstance(instance));
+			}
 		}
 		return Flux.fromIterable(Collections.singletonList(filteredInstances));
 	}
@@ -182,12 +193,5 @@ public class PolarisRouterServiceInstanceListSupplier extends DelegatingServiceI
 				responseInterceptor.apply(processRoutersResponse, routerContext);
 			}
 		}
-	}
-
-	private Map<String, String> getRouterLabels(PolarisRouterContext key, String type) {
-		if (key != null) {
-			return key.getLabels(type);
-		}
-		return Collections.emptyMap();
 	}
 }

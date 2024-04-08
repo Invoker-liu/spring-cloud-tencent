@@ -27,6 +27,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import com.tencent.cloud.polaris.config.listener.ConfigChangeEvent;
 import com.tencent.cloud.polaris.config.listener.ConfigChangeListener;
+import com.tencent.cloud.polaris.config.listener.SyncConfigChangeListener;
 
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -40,7 +41,7 @@ import static com.tencent.cloud.polaris.config.listener.PolarisConfigListenerCon
 
 /**
  * {@link PolarisConfigAnnotationProcessor} implementation for spring .
- * <p>This source file was reference from：
+ * <p>This source file was reference from:
  * <code><a href=https://github.com/apolloconfig/apollo/blob/master/apollo-client/src/main/java/com/ctrip/framework/apollo/spring/annotation/ApolloAnnotationProcessor.java>
  *     ApolloAnnotationProcessor</a></code>
  * @author <a href="mailto:iskp.me@gmail.com">Palmer Xu</a> 2022-06-07
@@ -90,8 +91,19 @@ public class PolarisConfigAnnotationProcessor implements BeanPostProcessor, Prio
 		ReflectionUtils.makeAccessible(method);
 		String[] annotatedInterestedKeys = annotation.interestedKeys();
 		String[] annotatedInterestedKeyPrefixes = annotation.interestedKeyPrefixes();
+		boolean isAsync = annotation.async();
 
-		ConfigChangeListener configChangeListener = changeEvent -> ReflectionUtils.invokeMethod(method, bean, changeEvent);
+		ConfigChangeListener configChangeListener = new SyncConfigChangeListener() {
+			@Override
+			public void onChange(ConfigChangeEvent changeEvent) {
+				ReflectionUtils.invokeMethod(method, bean, changeEvent);
+			}
+
+			@Override
+			public boolean isAsync() {
+				return isAsync;
+			}
+		};
 
 		Set<String> interestedKeys =
 				annotatedInterestedKeys.length > 0 ? Sets.newHashSet(annotatedInterestedKeys) : null;

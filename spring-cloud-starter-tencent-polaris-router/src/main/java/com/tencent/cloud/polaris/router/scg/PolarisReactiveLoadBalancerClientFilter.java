@@ -27,12 +27,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.tencent.cloud.common.constant.RouterConstants;
+import com.tencent.cloud.common.constant.RouterConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.metadata.StaticMetadataManager;
 import com.tencent.cloud.common.util.JacksonUtils;
+import com.tencent.cloud.common.util.expresstion.ExpressionLabelUtils;
 import com.tencent.cloud.common.util.expresstion.SpringWebExpressionLabelUtils;
+import com.tencent.cloud.polaris.context.config.PolarisContextProperties;
 import com.tencent.cloud.polaris.router.PolarisRouterServiceInstanceListSupplier;
 import com.tencent.cloud.polaris.router.RouterRuleLabelResolver;
 import com.tencent.cloud.polaris.router.spi.SpringWebRouterLabelResolver;
@@ -76,32 +78,32 @@ import static org.springframework.cloud.gateway.support.ServerWebExchangeUtils.a
  * with PolarisReactiveLoadBalancerClientFilter. The passed route labels are used in
  * {@link PolarisRouterServiceInstanceListSupplier}.
  *
- * @author lepdou 2022-06-20
+ * @author lepdou, Hoatian Zhang
  */
 public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalancerClientFilter {
 	private static final Logger log = LoggerFactory.getLogger(PolarisReactiveLoadBalancerClientFilter.class);
 
 	private final LoadBalancerClientFactory clientFactory;
 	private final GatewayLoadBalancerProperties gatewayLoadBalancerProperties;
-	private final LoadBalancerProperties loadBalancerProperties;
 	private final StaticMetadataManager staticMetadataManager;
 	private final RouterRuleLabelResolver routerRuleLabelResolver;
 	private final List<SpringWebRouterLabelResolver> routerLabelResolvers;
+	private final PolarisContextProperties polarisContextProperties;
 
 	public PolarisReactiveLoadBalancerClientFilter(LoadBalancerClientFactory clientFactory,
 			GatewayLoadBalancerProperties gatewayLoadBalancerProperties,
-			LoadBalancerProperties loadBalancerProperties,
 			StaticMetadataManager staticMetadataManager,
 			RouterRuleLabelResolver routerRuleLabelResolver,
-			List<SpringWebRouterLabelResolver> routerLabelResolvers) {
-		super(clientFactory, gatewayLoadBalancerProperties, loadBalancerProperties);
+			List<SpringWebRouterLabelResolver> routerLabelResolvers,
+			PolarisContextProperties polarisContextProperties) {
+		super(clientFactory, gatewayLoadBalancerProperties);
 
 		this.clientFactory = clientFactory;
 		this.gatewayLoadBalancerProperties = gatewayLoadBalancerProperties;
-		this.loadBalancerProperties = loadBalancerProperties;
 		this.staticMetadataManager = staticMetadataManager;
 		this.routerRuleLabelResolver = routerRuleLabelResolver;
 		this.routerLabelResolvers = routerLabelResolvers;
+		this.polarisContextProperties = polarisContextProperties;
 	}
 
 	/**
@@ -134,7 +136,7 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 		RequestData requestData = new RequestData(request.getMethod(), request.getURI(), routerHttpHeaders,
 				new HttpHeaders(), new HashMap<>());
 		DefaultRequest<RequestDataContext> lbRequest = new DefaultRequest<>(new RequestDataContext(
-				requestData, getHint(serviceId, loadBalancerProperties.getHint())));
+				requestData, getHint(serviceId)));
 
 		return choose(lbRequest, serviceId, supportedLifecycleProcessors).doOnNext(response -> {
 
@@ -179,6 +181,7 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 								new ResponseData(exchange.getResponse(), new RequestData(exchange.getRequest()))))));
 	}
 
+	@Override
 	protected URI reconstructURI(ServiceInstance serviceInstance, URI original) {
 		return LoadBalancerUriTools.reconstructURI(serviceInstance, original);
 	}
@@ -195,7 +198,9 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 	}
 
 	// no actual used
-	private String getHint(String serviceId, Map<String, String> hints) {
+	private String getHint(String serviceId) {
+		LoadBalancerProperties loadBalancerProperties = clientFactory.getProperties(serviceId);
+		Map<String, String> hints = loadBalancerProperties.getHint();
 		String defaultHint = hints.getOrDefault("default", "default");
 		String hintPropertyValue = hints.get(serviceId);
 		return hintPropertyValue != null ? hintPropertyValue : defaultHint;
@@ -205,7 +210,7 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 	// the router label is passed through the http header uniformly instead of the original hint mechanism.
 	HttpHeaders genRouterHttpHeaders(ServerWebExchange exchange, String peerServiceName) {
 		HttpHeaders headers = new HttpHeaders();
-		headers.add(RouterConstants.ROUTER_LABEL_HEADER, genRouterHint(exchange, peerServiceName));
+		headers.add(RouterConstant.ROUTER_LABEL_HEADER, genRouterHint(exchange, peerServiceName));
 		return headers;
 	}
 
@@ -250,8 +255,7 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 		}
 
 		// labels from downstream
-		Map<String, String> transitiveLabels = MetadataContextHolder.get()
-				.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE);
+		Map<String, String> transitiveLabels = MetadataContextHolder.get().getTransitiveMetadata();
 		labels.putAll(transitiveLabels);
 
 		return labels;
@@ -262,6 +266,16 @@ public class PolarisReactiveLoadBalancerClientFilter extends ReactiveLoadBalance
 			return Collections.emptyMap();
 		}
 
-		return SpringWebExpressionLabelUtils.resolve(exchange, labelKeys);
+		//enrich labels from request
+		Map<String, String> labels = SpringWebExpressionLabelUtils.resolve(exchange, labelKeys);
+
+		//enrich caller ip label
+		for (String labelKey : labelKeys) {
+			if (ExpressionLabelUtils.isCallerIPLabel(labelKey)) {
+				labels.put(labelKey, polarisContextProperties.getLocalIpAddress());
+			}
+		}
+
+		return labels;
 	}
 }

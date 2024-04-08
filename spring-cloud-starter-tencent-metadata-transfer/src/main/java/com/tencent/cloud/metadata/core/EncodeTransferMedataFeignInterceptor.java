@@ -19,10 +19,9 @@
 package com.tencent.cloud.metadata.core;
 
 import java.io.UnsupportedEncodingException;
-import java.util.HashMap;
 import java.util.Map;
 
-import com.tencent.cloud.common.constant.MetadataConstant;
+import com.tencent.cloud.common.constant.OrderConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.util.JacksonUtils;
@@ -52,27 +51,33 @@ public class EncodeTransferMedataFeignInterceptor implements RequestInterceptor,
 
 	@Override
 	public int getOrder() {
-		return MetadataConstant.OrderConstant.METADATA_2_HEADER_INTERCEPTOR_ORDER;
+		return OrderConstant.Client.Feign.ENCODE_TRANSFER_METADATA_INTERCEPTOR_ORDER;
 	}
 
 	@Override
 	public void apply(RequestTemplate requestTemplate) {
 		// get metadata of current thread
 		MetadataContext metadataContext = MetadataContextHolder.get();
-		Map<String, String> customMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE);
-		Map<String, String> disposableMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_DISPOSABLE);
+		Map<String, String> customMetadata = metadataContext.getCustomMetadata();
+		Map<String, String> disposableMetadata = metadataContext.getDisposableMetadata();
+		Map<String, String> transHeaders = metadataContext.getTransHeadersKV();
 
-		// Clean up one-time metadata coming from upstream .
-		Map<String, String> newestCustomMetadata = new HashMap<>();
-		customMetadata.forEach((key, value) -> {
-			if (!disposableMetadata.containsKey(key)) {
-				newestCustomMetadata.put(key, value);
-			}
-		});
 		this.buildMetadataHeader(requestTemplate, disposableMetadata, CUSTOM_DISPOSABLE_METADATA);
 
-		// process custom metadata finally
-		this.buildMetadataHeader(requestTemplate, newestCustomMetadata, CUSTOM_METADATA);
+		// process custom metadata
+		this.buildMetadataHeader(requestTemplate, customMetadata, CUSTOM_METADATA);
+
+		// set headers that need to be transmitted from the upstream
+		this.buildTransmittedHeader(requestTemplate, transHeaders);
+	}
+
+	private void buildTransmittedHeader(RequestTemplate requestTemplate, Map<String, String> transHeaders) {
+		if (!CollectionUtils.isEmpty(transHeaders)) {
+			transHeaders.entrySet().stream().forEach(entry -> {
+				requestTemplate.removeHeader(entry.getKey());
+				requestTemplate.header(entry.getKey(), entry.getValue());
+			});
+		}
 	}
 
 	/**

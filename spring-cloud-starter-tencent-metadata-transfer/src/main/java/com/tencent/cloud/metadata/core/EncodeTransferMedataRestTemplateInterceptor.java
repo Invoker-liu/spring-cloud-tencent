@@ -21,10 +21,9 @@ package com.tencent.cloud.metadata.core;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
-import java.util.HashMap;
 import java.util.Map;
 
-import com.tencent.cloud.common.constant.MetadataConstant;
+import com.tencent.cloud.common.constant.OrderConstant;
 import com.tencent.cloud.common.metadata.MetadataContext;
 import com.tencent.cloud.common.metadata.MetadataContextHolder;
 import com.tencent.cloud.common.util.JacksonUtils;
@@ -51,7 +50,7 @@ public class EncodeTransferMedataRestTemplateInterceptor implements ClientHttpRe
 
 	@Override
 	public int getOrder() {
-		return MetadataConstant.OrderConstant.METADATA_2_HEADER_INTERCEPTOR_ORDER;
+		return OrderConstant.Client.RestTemplate.ENCODE_TRANSFER_METADATA_INTERCEPTOR_ORDER;
 	}
 
 	@Override
@@ -59,22 +58,28 @@ public class EncodeTransferMedataRestTemplateInterceptor implements ClientHttpRe
 			@NonNull ClientHttpRequestExecution clientHttpRequestExecution) throws IOException {
 		// get metadata of current thread
 		MetadataContext metadataContext = MetadataContextHolder.get();
-		Map<String, String> customMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_TRANSITIVE);
-		Map<String, String> disposableMetadata = metadataContext.getFragmentContext(MetadataContext.FRAGMENT_DISPOSABLE);
+		Map<String, String> customMetadata = metadataContext.getCustomMetadata();
+		Map<String, String> disposableMetadata = metadataContext.getDisposableMetadata();
+		Map<String, String> transHeaders = metadataContext.getTransHeadersKV();
 
-		Map<String, String> newestCustomMetadata = new HashMap<>();
-		customMetadata.forEach((key, value) -> {
-			if (!disposableMetadata.containsKey(key)) {
-				newestCustomMetadata.put(key, value);
-			}
-		});
 		// build custom disposable metadata request header
 		this.buildMetadataHeader(httpRequest, disposableMetadata, CUSTOM_DISPOSABLE_METADATA);
 
 		// build custom metadata request header
-		this.buildMetadataHeader(httpRequest, newestCustomMetadata, CUSTOM_METADATA);
+		this.buildMetadataHeader(httpRequest, customMetadata, CUSTOM_METADATA);
+
+		// set headers that need to be transmitted from the upstream
+		this.buildTransmittedHeader(httpRequest, transHeaders);
 
 		return clientHttpRequestExecution.execute(httpRequest, bytes);
+	}
+
+	private void buildTransmittedHeader(HttpRequest request, Map<String, String> transHeaders) {
+		if (!CollectionUtils.isEmpty(transHeaders)) {
+			transHeaders.entrySet().stream().forEach(entry -> {
+				request.getHeaders().set(entry.getKey(), entry.getValue());
+			});
+		}
 	}
 
 	/**

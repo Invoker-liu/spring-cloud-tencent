@@ -19,37 +19,30 @@
 package com.tencent.cloud.polaris.discovery;
 
 import com.tencent.cloud.polaris.PolarisDiscoveryProperties;
+import com.tencent.cloud.polaris.context.PolarisSDKContextManager;
 import com.tencent.polaris.api.core.ConsumerAPI;
-import com.tencent.polaris.api.core.ProviderAPI;
 import com.tencent.polaris.api.rpc.GetAllInstancesRequest;
 import com.tencent.polaris.api.rpc.GetHealthyInstancesRequest;
 import com.tencent.polaris.api.rpc.GetServicesRequest;
 import com.tencent.polaris.api.rpc.InstancesResponse;
 import com.tencent.polaris.api.rpc.ServicesResponse;
-import com.tencent.polaris.client.api.SDKContext;
-
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 /**
  * Discovery Handler for Polaris.
  *
  * @author Haotian Zhang, Andrew Shan, Jie Cheng
  */
-@Component
 public class PolarisDiscoveryHandler {
 
-	@Autowired
-	private PolarisDiscoveryProperties polarisDiscoveryProperties;
+	private final PolarisDiscoveryProperties polarisDiscoveryProperties;
 
-	@Autowired
-	private ProviderAPI providerAPI;
+	private final ConsumerAPI polarisConsumer;
 
-	@Autowired
-	private SDKContext sdkContext;
-
-	@Autowired
-	private ConsumerAPI polarisConsumer;
+	public PolarisDiscoveryHandler(PolarisDiscoveryProperties polarisDiscoveryProperties,
+			PolarisSDKContextManager polarisSDKContextManager) {
+		this.polarisDiscoveryProperties = polarisDiscoveryProperties;
+		this.polarisConsumer = polarisSDKContextManager.getConsumerAPI();
+	}
 
 	/**
 	 * Get a list of healthy instances.
@@ -61,6 +54,7 @@ public class PolarisDiscoveryHandler {
 		GetHealthyInstancesRequest getHealthyInstancesRequest = new GetHealthyInstancesRequest();
 		getHealthyInstancesRequest.setNamespace(namespace);
 		getHealthyInstancesRequest.setService(service);
+		getHealthyInstancesRequest.setIncludeCircuitBreakInstances(false);
 		return polarisConsumer.getHealthyInstances(getHealthyInstancesRequest);
 	}
 
@@ -74,15 +68,7 @@ public class PolarisDiscoveryHandler {
 		GetAllInstancesRequest request = new GetAllInstancesRequest();
 		request.setNamespace(namespace);
 		request.setService(service);
-		return polarisConsumer.getAllInstance(request);
-	}
-
-	public ProviderAPI getProviderAPI() {
-		return providerAPI;
-	}
-
-	public SDKContext getSdkContext() {
-		return sdkContext;
+		return polarisConsumer.getAllInstances(request);
 	}
 
 	/**

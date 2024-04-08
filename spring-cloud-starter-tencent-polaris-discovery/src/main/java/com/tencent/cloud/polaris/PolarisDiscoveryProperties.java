@@ -19,16 +19,9 @@
 package com.tencent.cloud.polaris;
 
 import com.tencent.cloud.common.constant.ContextConstant;
-import com.tencent.cloud.polaris.context.PolarisConfigModifier;
-import com.tencent.polaris.factory.config.ConfigurationImpl;
-import com.tencent.polaris.factory.config.consumer.DiscoveryConfigImpl;
-import com.tencent.polaris.factory.config.provider.RegisterConfigImpl;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Bean;
 
 import static com.tencent.cloud.common.constant.ContextConstant.DEFAULT_REGISTRY_HEARTBEAT_TIME_INTERVAL;
 
@@ -53,6 +46,11 @@ public class PolarisDiscoveryProperties {
 	private String service;
 
 	/**
+	 * Service instance id.
+	 */
+	private String instanceId;
+
+	/**
 	 * The polaris authentication token.
 	 */
 	private String token;
@@ -66,19 +64,13 @@ public class PolarisDiscoveryProperties {
 	/**
 	 * Version number.
 	 */
-	private String version;
+	private String version = "1.0.0";
 
 	/**
 	 * Protocol name such as http, https.
 	 */
 	@Value("${spring.cloud.polaris.discovery.protocol:http}")
 	private String protocol;
-
-	/**
-	 * Port of instance.
-	 */
-	@Value("${server.port:8080}")
-	private int port;
 
 	/**
 	 * Enable polaris discovery or not.
@@ -90,12 +82,6 @@ public class PolarisDiscoveryProperties {
 	 */
 	@Value("${spring.cloud.polaris.discovery.register:#{true}}")
 	private Boolean registerEnabled;
-
-	/**
-	 * If heartbeat enabled.
-	 */
-	@Value("${spring.cloud.polaris.discovery.heartbeat.enabled:#{true}}")
-	private Boolean heartbeatEnabled = true;
 
 	/**
 	 * Heartbeat interval ( 0 < interval <= 60).
@@ -115,13 +101,12 @@ public class PolarisDiscoveryProperties {
 	 */
 	private Long serviceListRefreshInterval = 60000L;
 
-
-	public boolean isHeartbeatEnabled() {
-		return heartbeatEnabled;
+	public String getInstanceId() {
+		return instanceId;
 	}
 
-	public void setHeartbeatEnabled(Boolean heartbeatEnabled) {
-		this.heartbeatEnabled = heartbeatEnabled;
+	public void setInstanceId(String instanceId) {
+		this.instanceId = instanceId;
 	}
 
 	public String getNamespace() {
@@ -152,16 +137,8 @@ public class PolarisDiscoveryProperties {
 		return enabled;
 	}
 
-	public void setEnabled(Boolean enabled) {
-		this.enabled = enabled;
-	}
-
 	public boolean isRegisterEnabled() {
 		return registerEnabled;
-	}
-
-	public void setRegisterEnabled(boolean registerEnabled) {
-		this.registerEnabled = registerEnabled;
 	}
 
 	public String getToken() {
@@ -188,14 +165,6 @@ public class PolarisDiscoveryProperties {
 		this.protocol = protocol;
 	}
 
-	public int getPort() {
-		return port;
-	}
-
-	public void setPort(int port) {
-		this.port = port;
-	}
-
 	public String getHealthCheckUrl() {
 		return healthCheckUrl;
 	}
@@ -213,7 +182,7 @@ public class PolarisDiscoveryProperties {
 	}
 
 	public Integer getHeartbeatInterval() {
-		if (this.heartbeatEnabled && (this.heartbeatInterval <= 0 || this.heartbeatInterval > 60)) {
+		if (this.heartbeatInterval <= 0 || this.heartbeatInterval > 60) {
 			heartbeatInterval = DEFAULT_REGISTRY_HEARTBEAT_TIME_INTERVAL;
 		}
 		return heartbeatInterval;
@@ -223,56 +192,41 @@ public class PolarisDiscoveryProperties {
 		this.heartbeatInterval = heartbeatInterval;
 	}
 
+	public Boolean getEnabled() {
+		return enabled;
+	}
+
+	public void setEnabled(Boolean enabled) {
+		this.enabled = enabled;
+	}
+
+	public Boolean getRegisterEnabled() {
+		return registerEnabled;
+	}
+
+	public void setRegisterEnabled(boolean registerEnabled) {
+		this.registerEnabled = registerEnabled;
+	}
+
+	public void setRegisterEnabled(Boolean registerEnabled) {
+		this.registerEnabled = registerEnabled;
+	}
+
 	@Override
 	public String toString() {
 		return "PolarisDiscoveryProperties{" +
 				"namespace='" + namespace + '\'' +
 				", service='" + service + '\'' +
+				", instanceId='" + instanceId + '\'' +
 				", token='" + token + '\'' +
 				", weight=" + weight +
 				", version='" + version + '\'' +
 				", protocol='" + protocol + '\'' +
-				", port=" + port +
 				", enabled=" + enabled +
 				", registerEnabled=" + registerEnabled +
-				", heartbeatEnabled=" + heartbeatEnabled +
 				", heartbeatInterval=" + heartbeatInterval +
 				", healthCheckUrl='" + healthCheckUrl + '\'' +
 				", serviceListRefreshInterval=" + serviceListRefreshInterval +
 				'}';
-	}
-
-	@Bean
-	@ConditionalOnMissingBean
-	public PolarisDiscoveryConfigModifier polarisDiscoveryConfigModifier() {
-		return new PolarisDiscoveryConfigModifier();
-	}
-
-	private static class PolarisDiscoveryConfigModifier implements PolarisConfigModifier {
-
-		private static final String ID = "polaris";
-
-		@Autowired(required = false)
-		private PolarisDiscoveryProperties polarisDiscoveryProperties;
-
-		@Override
-		public void modify(ConfigurationImpl configuration) {
-			if (polarisDiscoveryProperties != null) {
-				DiscoveryConfigImpl discoveryConfig = new DiscoveryConfigImpl();
-				discoveryConfig.setServerConnectorId(ID);
-				discoveryConfig.setEnable(polarisDiscoveryProperties.enabled);
-				configuration.getConsumer().getDiscoveries().add(discoveryConfig);
-
-				RegisterConfigImpl registerConfig = new RegisterConfigImpl();
-				registerConfig.setServerConnectorId(ID);
-				registerConfig.setEnable(polarisDiscoveryProperties.registerEnabled);
-				configuration.getProvider().getRegisters().add(registerConfig);
-			}
-		}
-
-		@Override
-		public int getOrder() {
-			return ContextConstant.ModifierOrder.LAST;
-		}
 	}
 }

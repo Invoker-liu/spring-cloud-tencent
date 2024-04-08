@@ -13,16 +13,19 @@
  * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
  * CONDITIONS OF ANY KIND, either express or implied. See the License for the
  * specific language governing permissions and limitations under the License.
- *
  */
 
 package com.tencent.cloud.common.metadata;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.tencent.cloud.common.metadata.config.MetadataLocalProperties;
 import com.tencent.cloud.common.spi.InstanceMetadataProvider;
@@ -35,7 +38,7 @@ import org.springframework.util.CollectionUtils;
 /**
  * manage metadata from env/config file/custom spi.
  *
- * @author lepdou 2022-05-20
+ * @author lepdou, Haotian Zhang
  */
 public class StaticMetadataManager {
 	/**
@@ -55,15 +58,23 @@ public class StaticMetadataManager {
 	private static final int ENV_METADATA_PREFIX_LENGTH = ENV_METADATA_PREFIX.length();
 	private static final String ENV_METADATA_CONTENT_TRANSITIVE = "SCT_METADATA_CONTENT_TRANSITIVE";
 	private static final String ENV_METADATA_CONTENT_DISPOSABLE = "SCT_METADATA_CONTENT_DISPOSABLE";
+	/**
+	 * This is the key of the header's key list needed to be transmitted. The list is a string split with ,.
+	 * The value mapped by this key was specified by user.
+	 * This is configured in environment variables.
+	 */
+	private static final String ENV_TRAFFIC_CONTENT_RAW_TRANSHEADERS = "SCT_TRAFFIC_CONTENT_RAW_TRANSHEADERS";
 	private static final String ENV_METADATA_ZONE = "SCT_METADATA_ZONE";
 	private static final String ENV_METADATA_REGION = "SCT_METADATA_REGION";
 	private static final String ENV_METADATA_CAMPUS = "SCT_METADATA_CAMPUS";
 	private Map<String, String> envMetadata;
 	private Map<String, String> envTransitiveMetadata;
 	private Map<String, String> envDisposableMetadata;
+	private Map<String, String> envNotReportMetadata;
 	private Map<String, String> configMetadata;
 	private Map<String, String> configTransitiveMetadata;
 	private Map<String, String> configDisposableMetadata;
+	private String configTransHeaders;
 	private Map<String, String> customSPIMetadata;
 	private Map<String, String> customSPITransitiveMetadata;
 	private Map<String, String> customSPIDisposableMetadata;
@@ -75,14 +86,14 @@ public class StaticMetadataManager {
 	private String campus;
 
 	public StaticMetadataManager(MetadataLocalProperties metadataLocalProperties,
-			InstanceMetadataProvider instanceMetadataProvider) {
+			List<InstanceMetadataProvider> instanceMetadataProviders) {
 		parseConfigMetadata(metadataLocalProperties);
 
 		parseEnvMetadata();
 
-		parseCustomMetadata(instanceMetadataProvider);
+		parseCustomMetadata(instanceMetadataProviders);
 
-		parseLocationMetadata(metadataLocalProperties, instanceMetadataProvider);
+		parseLocationMetadata(metadataLocalProperties, instanceMetadataProviders);
 
 		merge();
 
@@ -94,14 +105,24 @@ public class StaticMetadataManager {
 		Map<String, String> allEnvs = System.getenv();
 
 		envMetadata = new HashMap<>();
+		envNotReportMetadata = new HashMap<>();
 		// parse all metadata
 		for (Map.Entry<String, String> entry : allEnvs.entrySet()) {
 			String key = entry.getKey();
 			String value = entry.getValue();
-			if (StringUtils.isNotBlank(key) && key.startsWith(ENV_METADATA_PREFIX)
-					&& !key.equals(ENV_METADATA_CONTENT_TRANSITIVE)) {
-				String sourceKey = StringUtils.substring(key, ENV_METADATA_PREFIX_LENGTH);
-				envMetadata.put(sourceKey, value);
+			if (StringUtils.isNotBlank(key)
+					&& (key.startsWith(ENV_METADATA_PREFIX) || key.equals(ENV_TRAFFIC_CONTENT_RAW_TRANSHEADERS))
+					&& !key.equals(ENV_METADATA_CONTENT_TRANSITIVE)
+					&& !key.equals(ENV_METADATA_CONTENT_DISPOSABLE)) {
+				String sourceKey = "";
+				if (key.equals(ENV_TRAFFIC_CONTENT_RAW_TRANSHEADERS)) {
+					sourceKey = key;
+					envNotReportMetadata.put(sourceKey, value);
+				}
+				else {
+					sourceKey = StringUtils.substring(key, ENV_METADATA_PREFIX_LENGTH);
+					envMetadata.put(sourceKey, value);
+				}
 
 				LOGGER.info("[SCT] resolve metadata from env. key = {}, value = {}", sourceKey, value);
 			}
@@ -145,6 +166,7 @@ public class StaticMetadataManager {
 		Map<String, String> allMetadata = metadataLocalProperties.getContent();
 		List<String> transitiveKeys = metadataLocalProperties.getTransitive();
 		List<String> disposableKeys = metadataLocalProperties.getDisposable();
+		List<String> headers = metadataLocalProperties.getHeaders();
 
 		Map<String, String> transitiveResult = new HashMap<>();
 		for (String key : transitiveKeys) {
@@ -162,25 +184,30 @@ public class StaticMetadataManager {
 
 		configTransitiveMetadata = Collections.unmodifiableMap(transitiveResult);
 		configDisposableMetadata = Collections.unmodifiableMap(disposableResult);
+		configTransHeaders = CollectionUtils.isEmpty(headers) ? null : String.join(",", headers);
 		configMetadata = Collections.unmodifiableMap(allMetadata);
 	}
 
 	@SuppressWarnings("DuplicatedCode")
-	private void parseCustomMetadata(InstanceMetadataProvider instanceMetadataProvider) {
-		if (instanceMetadataProvider == null) {
-			customSPIMetadata = Collections.emptyMap();
-			customSPITransitiveMetadata = Collections.emptyMap();
-			customSPIDisposableMetadata = Collections.emptyMap();
-			return;
+	private void parseCustomMetadata(List<InstanceMetadataProvider> instanceMetadataProviders) {
+		// init customSPIMetadata
+		customSPIMetadata = new HashMap<>();
+		customSPITransitiveMetadata = new HashMap<>();
+		customSPIDisposableMetadata = new HashMap<>();
+		if (!CollectionUtils.isEmpty(instanceMetadataProviders)) {
+			instanceMetadataProviders.forEach(this::parseCustomMetadata);
 		}
+		customSPIMetadata = Collections.unmodifiableMap(customSPIMetadata);
+		customSPITransitiveMetadata = Collections.unmodifiableMap(customSPITransitiveMetadata);
+		customSPIDisposableMetadata = Collections.unmodifiableMap(customSPIDisposableMetadata);
+	}
 
+	@SuppressWarnings("DuplicatedCode")
+	private void parseCustomMetadata(InstanceMetadataProvider instanceMetadataProvider) {
 		// resolve all metadata
 		Map<String, String> allMetadata = instanceMetadataProvider.getMetadata();
-		if (allMetadata == null) {
-			customSPIMetadata = Collections.emptyMap();
-		}
-		else {
-			customSPIMetadata = Collections.unmodifiableMap(allMetadata);
+		if (!CollectionUtils.isEmpty(allMetadata)) {
+			customSPIMetadata.putAll(allMetadata);
 		}
 
 		// resolve transitive metadata
@@ -193,7 +220,7 @@ public class StaticMetadataManager {
 				}
 			}
 		}
-		customSPITransitiveMetadata = Collections.unmodifiableMap(transitiveMetadata);
+		customSPITransitiveMetadata.putAll(transitiveMetadata);
 
 		Set<String> disposableKeys = instanceMetadataProvider.getDisposableMetadataKeys();
 		Map<String, String> disposableMetadata = new HashMap<>();
@@ -204,7 +231,7 @@ public class StaticMetadataManager {
 				}
 			}
 		}
-		customSPIDisposableMetadata = Collections.unmodifiableMap(disposableMetadata);
+		customSPIDisposableMetadata.putAll(disposableMetadata);
 	}
 
 	private void merge() {
@@ -231,10 +258,16 @@ public class StaticMetadataManager {
 	}
 
 	private void parseLocationMetadata(MetadataLocalProperties metadataLocalProperties,
-			InstanceMetadataProvider instanceMetadataProvider) {
+			List<InstanceMetadataProvider> instanceMetadataProviders) {
 		// resolve region info
-		if (instanceMetadataProvider != null) {
-			region = instanceMetadataProvider.getRegion();
+		if (!CollectionUtils.isEmpty(instanceMetadataProviders)) {
+			Set<String> providerRegions = instanceMetadataProviders.stream().map(InstanceMetadataProvider::getRegion).filter(region -> !StringUtils.isBlank(region)).collect(Collectors.toSet());
+			if (!CollectionUtils.isEmpty(providerRegions)) {
+				if (providerRegions.size() > 1) {
+					throw new IllegalArgumentException("Multiple Regions Provided in InstanceMetadataProviders");
+				}
+				region = providerRegions.iterator().next();
+			}
 		}
 		if (StringUtils.isBlank(region)) {
 			region = System.getenv(ENV_METADATA_REGION);
@@ -244,8 +277,14 @@ public class StaticMetadataManager {
 		}
 
 		// resolve zone info
-		if (instanceMetadataProvider != null) {
-			zone = instanceMetadataProvider.getZone();
+		if (!CollectionUtils.isEmpty(instanceMetadataProviders)) {
+			Set<String> providerZones = instanceMetadataProviders.stream().map(InstanceMetadataProvider::getZone).filter(zone -> !StringUtils.isBlank(zone)).collect(Collectors.toSet());
+			if (!CollectionUtils.isEmpty(providerZones)) {
+				if (providerZones.size() > 1) {
+					throw new IllegalArgumentException("Multiple Zones Provided in InstanceMetadataProviders");
+				}
+				zone = providerZones.iterator().next();
+			}
 		}
 		if (StringUtils.isBlank(zone)) {
 			zone = System.getenv(ENV_METADATA_ZONE);
@@ -255,8 +294,14 @@ public class StaticMetadataManager {
 		}
 
 		// resolve campus info
-		if (instanceMetadataProvider != null) {
-			campus = instanceMetadataProvider.getCampus();
+		if (!CollectionUtils.isEmpty(instanceMetadataProviders)) {
+			Set<String> providerCampus = instanceMetadataProviders.stream().map(InstanceMetadataProvider::getCampus).filter(campus -> !StringUtils.isBlank(campus)).collect(Collectors.toSet());
+			if (!CollectionUtils.isEmpty(providerCampus)) {
+				if (providerCampus.size() > 1) {
+					throw new IllegalArgumentException("Multiple Campus Provided in InstanceMetadataProviders");
+				}
+				campus = providerCampus.iterator().next();
+			}
 		}
 		if (StringUtils.isBlank(campus)) {
 			campus = System.getenv(ENV_METADATA_CAMPUS);
@@ -268,6 +313,33 @@ public class StaticMetadataManager {
 
 	public Map<String, String> getAllEnvMetadata() {
 		return envMetadata;
+	}
+
+	public String getTransHeaderFromEnv() {
+		return envNotReportMetadata.get(ENV_TRAFFIC_CONTENT_RAW_TRANSHEADERS);
+	}
+
+	public String getTransHeaderFromConfig() {
+		return configTransHeaders;
+	}
+
+	public String getTransHeader() {
+		Set<String> transHeaderSet = new HashSet<>();
+
+		String transHeaderFromEnv = getTransHeaderFromEnv();
+		String transHeaderFromConfig = getTransHeaderFromConfig();
+
+		Set<String> transHeaderFromEnvSet = StringUtils.isNotBlank(transHeaderFromEnv)
+				? Arrays.stream(transHeaderFromEnv.split(",")).collect(Collectors.toSet())
+				: Collections.emptySet();
+		Set<String> transHeaderFromConfigSet = StringUtils.isNotBlank(transHeaderFromConfig)
+				? Arrays.stream(transHeaderFromConfig.split(",")).collect(Collectors.toSet())
+				: Collections.emptySet();
+
+		transHeaderSet.addAll(transHeaderFromEnvSet);
+		transHeaderSet.addAll(transHeaderFromConfigSet);
+
+		return new ArrayList<>(transHeaderSet).stream().sorted().collect(Collectors.joining(","));
 	}
 
 	public Map<String, String> getEnvTransitiveMetadata() {
@@ -347,6 +419,7 @@ public class StaticMetadataManager {
 				", envTransitiveMetadata=" + envTransitiveMetadata +
 				", configMetadata=" + configMetadata +
 				", configTransitiveMetadata=" + configTransitiveMetadata +
+				", configTransHeaders='" + configTransHeaders + '\'' +
 				", customSPIMetadata=" + customSPIMetadata +
 				", customSPITransitiveMetadata=" + customSPITransitiveMetadata +
 				", mergedStaticMetadata=" + mergedStaticMetadata +

@@ -22,20 +22,19 @@ import com.tencent.cloud.common.util.BeanFactoryUtils;
 import com.tencent.cloud.polaris.router.RouterRuleLabelResolver;
 import com.tencent.cloud.polaris.router.scg.PolarisReactiveLoadBalancerClientFilter;
 import com.tencent.cloud.polaris.router.spi.SpringWebRouterLabelResolver;
-import org.junit.Assert;
-import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
-import org.mockito.junit.MockitoJUnitRunner;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.beans.factory.BeanFactory;
-import org.springframework.cloud.client.loadbalancer.LoadBalancerProperties;
 import org.springframework.cloud.gateway.config.GatewayLoadBalancerProperties;
 import org.springframework.cloud.gateway.filter.ReactiveLoadBalancerClientFilter;
 import org.springframework.cloud.loadbalancer.support.LoadBalancerClientFactory;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
 
@@ -44,7 +43,7 @@ import static org.mockito.Mockito.when;
  *
  * @author lepdou 2022-07-04
  */
-@RunWith(MockitoJUnitRunner.class)
+@ExtendWith(MockitoExtension.class)
 public class ReactiveLoadBalancerClientFilterBeanPostProcessorTest {
 
 	@Mock
@@ -54,8 +53,6 @@ public class ReactiveLoadBalancerClientFilterBeanPostProcessorTest {
 	@Mock
 	private GatewayLoadBalancerProperties gatewayLoadBalancerProperties;
 	@Mock
-	private LoadBalancerProperties loadBalancerProperties;
-	@Mock
 	private StaticMetadataManager staticMetadataManager;
 	@Mock
 	private RouterRuleLabelResolver routerRuleLabelResolver;
@@ -64,7 +61,6 @@ public class ReactiveLoadBalancerClientFilterBeanPostProcessorTest {
 	public void testWrapReactiveLoadBalancerClientFilter() {
 		when(beanFactory.getBean(LoadBalancerClientFactory.class)).thenReturn(loadBalancerClientFactory);
 		when(beanFactory.getBean(GatewayLoadBalancerProperties.class)).thenReturn(gatewayLoadBalancerProperties);
-		when(beanFactory.getBean(LoadBalancerProperties.class)).thenReturn(loadBalancerProperties);
 		when(beanFactory.getBean(StaticMetadataManager.class)).thenReturn(staticMetadataManager);
 		when(beanFactory.getBean(RouterRuleLabelResolver.class)).thenReturn(routerRuleLabelResolver);
 
@@ -73,14 +69,13 @@ public class ReactiveLoadBalancerClientFilterBeanPostProcessorTest {
 					.thenReturn(null);
 
 			ReactiveLoadBalancerClientFilter reactiveLoadBalancerClientFilter = new ReactiveLoadBalancerClientFilter(
-					loadBalancerClientFactory, gatewayLoadBalancerProperties, loadBalancerProperties);
+					loadBalancerClientFactory, gatewayLoadBalancerProperties);
 
 			ReactiveLoadBalancerClientFilterBeanPostProcessor processor = new ReactiveLoadBalancerClientFilterBeanPostProcessor();
 			processor.setBeanFactory(beanFactory);
 
 			Object bean = processor.postProcessBeforeInitialization(reactiveLoadBalancerClientFilter, "");
-
-			Assert.assertTrue(bean instanceof PolarisReactiveLoadBalancerClientFilter);
+			assertThat(bean).isInstanceOf(PolarisReactiveLoadBalancerClientFilter.class);
 		}
 	}
 
@@ -91,8 +86,8 @@ public class ReactiveLoadBalancerClientFilterBeanPostProcessorTest {
 
 		OtherBean otherBean = new OtherBean();
 		Object bean = processor.postProcessBeforeInitialization(otherBean, "");
-		Assert.assertFalse(bean instanceof PolarisReactiveLoadBalancerClientFilter);
-		Assert.assertTrue(bean instanceof OtherBean);
+		assertThat(bean).isNotInstanceOf(PolarisReactiveLoadBalancerClientFilter.class);
+		assertThat(bean).isInstanceOf(OtherBean.class);
 	}
 
 	static class OtherBean {

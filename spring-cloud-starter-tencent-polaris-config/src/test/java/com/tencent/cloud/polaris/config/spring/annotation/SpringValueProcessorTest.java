@@ -27,13 +27,13 @@ import java.util.Optional;
 
 import com.tencent.cloud.polaris.config.PolarisConfigBootstrapAutoConfiguration;
 import com.tencent.cloud.polaris.config.enums.RefreshType;
+import com.tencent.cloud.polaris.config.spring.property.Person;
 import com.tencent.cloud.polaris.config.spring.property.SpringValue;
 import com.tencent.cloud.polaris.config.spring.property.SpringValueRegistry;
 import com.tencent.polaris.api.utils.CollectionUtils;
-import org.junit.AfterClass;
-import org.junit.Assert;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,7 +43,10 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.cloud.autoconfigure.RefreshAutoConfiguration;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.ImportResource;
 import org.springframework.stereotype.Component;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Test for {@link SpringValueProcessor}.
@@ -54,8 +57,8 @@ public class SpringValueProcessorTest {
 
 	private static ServerSocket serverSocket;
 
-	@BeforeClass
-	public static void before() {
+	@BeforeAll
+	static void beforeAll() {
 		new Thread(() -> {
 			try {
 				serverSocket = new ServerSocket(8093);
@@ -67,9 +70,11 @@ public class SpringValueProcessorTest {
 		}).start();
 	}
 
-	@AfterClass
-	public static void after() throws IOException {
-		serverSocket.close();
+	@AfterAll
+	static void afterAll() throws IOException {
+		if (Objects.nonNull(serverSocket)) {
+			serverSocket.close();
+		}
 	}
 
 	@Test
@@ -79,6 +84,7 @@ public class SpringValueProcessorTest {
 				.withConfiguration(AutoConfigurations.of(RefreshAutoConfiguration.class))
 				.withConfiguration(AutoConfigurations.of(ValueTest.class))
 				.withConfiguration(AutoConfigurations.of(PolarisConfigAutoConfiguration.class))
+				.withAllowBeanDefinitionOverriding(true)
 				.withPropertyValues("spring.application.name=" + "conditionalOnConfigReflectEnabledTest")
 				.withPropertyValues("spring.cloud.polaris.address=grpc://127.0.0.1:10081")
 				.withPropertyValues("spring.cloud.polaris.config.refresh-type=" + RefreshType.REFLECT)
@@ -89,19 +95,19 @@ public class SpringValueProcessorTest {
 			PolarisConfigAutoConfiguration polarisConfigAutoConfiguration = context.getBean(PolarisConfigAutoConfiguration.class);
 			BeanFactory beanFactory = polarisConfigAutoConfiguration.beanFactory;
 			Collection<SpringValue> timeout = springValueRegistry.get(beanFactory, "timeout");
-			Assert.assertFalse(CollectionUtils.isEmpty(timeout));
+			assertThat(CollectionUtils.isEmpty(timeout)).isFalse();
 			Optional<SpringValue> springValueOptional = timeout.stream().findAny();
-			Assert.assertTrue(springValueOptional.isPresent());
+			assertThat(springValueOptional.isPresent()).isTrue();
 
 			SpringValue springValue = springValueOptional.get();
-			Assert.assertEquals("${timeout:1000}", springValue.getPlaceholder());
-			Assert.assertTrue(springValue.isField());
-			Assert.assertTrue(Objects.nonNull(springValue.getField()));
-			Assert.assertEquals("timeout", springValue.getField().getName());
-			Assert.assertEquals(int.class, springValue.getTargetType());
+			assertThat(springValue.getPlaceholder()).isEqualTo("${timeout:1000}");
+			assertThat(springValue.isField()).isTrue();
+			assertThat(springValue.getField()).isNotNull();
+			assertThat(springValue.getField().getName()).isEqualTo("timeout");
+			assertThat(springValue.getTargetType()).isEqualTo(int.class);
 
 			ValueTest bean = context.getBean(ValueTest.class);
-			Assert.assertEquals(10000, bean.timeout);
+			assertThat(bean.timeout).isEqualTo(10000);
 		});
 	}
 
@@ -112,6 +118,7 @@ public class SpringValueProcessorTest {
 				.withConfiguration(AutoConfigurations.of(RefreshAutoConfiguration.class))
 				.withConfiguration(AutoConfigurations.of(ValueTest.class))
 				.withConfiguration(AutoConfigurations.of(PolarisConfigAutoConfiguration.class))
+				.withAllowBeanDefinitionOverriding(true)
 				.withPropertyValues("spring.application.name=" + "conditionalOnConfigReflectEnabledTest")
 				.withPropertyValues("spring.cloud.polaris.address=grpc://127.0.0.1:10081")
 				.withPropertyValues("spring.cloud.polaris.config.refresh-type=" + RefreshType.REFLECT)
@@ -122,20 +129,68 @@ public class SpringValueProcessorTest {
 			PolarisConfigAutoConfiguration polarisConfigAutoConfiguration = context.getBean(PolarisConfigAutoConfiguration.class);
 			BeanFactory beanFactory = polarisConfigAutoConfiguration.beanFactory;
 			Collection<SpringValue> name = springValueRegistry.get(beanFactory, "name");
-			Assert.assertFalse(CollectionUtils.isEmpty(name));
+			assertThat(name).isNotEmpty();
 			Optional<SpringValue> springValueOptional = name.stream().findAny();
-			Assert.assertTrue(springValueOptional.isPresent());
+			assertThat(springValueOptional.isPresent()).isTrue();
 
 			SpringValue springValue = springValueOptional.get();
 			Method method = springValue.getMethodParameter().getMethod();
-			Assert.assertTrue(Objects.nonNull(method));
-			Assert.assertEquals("setName", method.getName());
-			Assert.assertEquals("${name:1000}", springValue.getPlaceholder());
-			Assert.assertFalse(springValue.isField());
-			Assert.assertEquals(String.class, springValue.getTargetType());
+			assertThat(method).isNotNull();
+			assertThat(method.getName()).isEqualTo("setName");
+			assertThat(springValue.getPlaceholder()).isEqualTo("${name:1000}");
+			assertThat(springValue.isField()).isFalse();
+			assertThat(springValue.getTargetType()).isEqualTo(String.class);
 
-			Assert.assertEquals("test", ValueTest.name);
+			assertThat(ValueTest.name).isEqualTo("test");
 		});
+	}
+
+	@Test
+	public void xmlBeamDefinitionTest() {
+		ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+				.withConfiguration(AutoConfigurations.of(PolarisConfigBootstrapAutoConfiguration.class))
+				.withConfiguration(AutoConfigurations.of(RefreshAutoConfiguration.class))
+				.withConfiguration(AutoConfigurations.of(XMLBeamDefinitionTest.class))
+				.withConfiguration(AutoConfigurations.of(PolarisConfigAutoConfiguration.class))
+				.withAllowBeanDefinitionOverriding(true)
+				.withPropertyValues("spring.application.name=" + "conditionalOnConfigReflectEnabledTest")
+				.withPropertyValues("spring.cloud.polaris.address=grpc://127.0.0.1:10081")
+				.withPropertyValues("spring.cloud.polaris.config.refresh-type=" + RefreshType.REFLECT)
+				.withPropertyValues("spring.cloud.polaris.config.enabled=true")
+				.withPropertyValues("name=test");
+		contextRunner.run(context -> {
+			Person person = context.getBean(Person.class);
+
+			SpringValueRegistry springValueRegistry = context.getBean(SpringValueRegistry.class);
+			BeanFactory beanFactory = person.getBeanFactory();
+			Collection<SpringValue> name = springValueRegistry.get(beanFactory, "name");
+			assertThat(name).isNotEmpty();
+			Optional<SpringValue> nameSpringValueOptional = name.stream().findAny();
+			assertThat(nameSpringValueOptional.isPresent()).isTrue();
+
+			SpringValue nameSpringValue = nameSpringValueOptional.get();
+			Method method = nameSpringValue.getMethodParameter().getMethod();
+			assertThat(method).isNotNull();
+			assertThat(method.getName()).isEqualTo("setName");
+			assertThat(nameSpringValue.getPlaceholder()).isEqualTo("${name:test}");
+			assertThat(nameSpringValue.isField()).isFalse();
+			assertThat(nameSpringValue.getTargetType()).isEqualTo(String.class);
+
+
+			Collection<SpringValue> age = springValueRegistry.get(beanFactory, "age");
+			assertThat(age).isNotEmpty();
+			Optional<SpringValue> ageSpringValueOptional = age.stream().findAny();
+			assertThat(ageSpringValueOptional.isPresent()).isTrue();
+
+			SpringValue ageSpringValue = ageSpringValueOptional.get();
+			Method method1 = ageSpringValue.getMethodParameter().getMethod();
+			assertThat(method1).isNotNull();
+			assertThat(method1.getName()).isEqualTo("setAge");
+			assertThat(ageSpringValue.getPlaceholder()).isEqualTo("${age:10}");
+			assertThat(ageSpringValue.isField()).isFalse();
+			assertThat(ageSpringValue.getTargetType()).isEqualTo(String.class);
+		});
+
 	}
 
 	@Configuration
@@ -172,5 +227,10 @@ public class SpringValueProcessorTest {
 		public void setName(String name) {
 			ValueTest.name = name;
 		}
+	}
+
+	@Configuration
+	@ImportResource("classpath:bean.xml")
+	static class XMLBeamDefinitionTest {
 	}
 }
